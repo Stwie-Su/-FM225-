@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FM225 可视化调试平台</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#ffffff; --line:#e3e8ef;
+    --ink:#1f2733; --sub:#6b7785; --accent:#2f6df0; --accent2:#0fae8e;
+    --tx:#1f9d55; --rx:#2f6df0; --err:#e0483c; --warn:#d98b00;
+    --shadow:0 1px 3px rgba(20,30,50,.08),0 4px 16px rgba(20,30,50,.05);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:12px 18px;background:#fff;
+    border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .tag{font-size:12px;color:var(--sub)}
+  .pill{margin-left:auto;font-size:12px;padding:4px 10px;border-radius:999px;
+    background:#eef1f6;color:var(--sub)}
+  .pill.on{background:#e6f7f0;color:var(--accent2)}
+  .pill.off{background:#fdecea;color:var(--err)}
+
+  /* 紧凑两列布局 */
+  .wrap{display:grid;grid-template-columns:380px 1fr;gap:14px;padding:14px;
+    max-width:1100px;margin:0 auto;align-items:start}
+  @media (max-width:860px){ .wrap{grid-template-columns:1fr} }
+
+  .col{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;box-shadow:var(--shadow)}
+  .card h2{font-size:12px;margin:0 0 10px;color:var(--sub);text-transform:uppercase;
+    letter-spacing:.04em;font-weight:700}
+  label{font-size:12px;color:var(--sub);display:block;margin:8px 0 4px}
+  select,input[type=text],input[type=number]{width:100%;padding:8px 10px;border:1px solid var(--line);
+    border-radius:8px;background:#fbfcfe;color:var(--ink);font-size:13px}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1}
+  button{cursor:pointer;border:none;border-radius:8px;padding:9px 12px;font-size:13px;
+    font-weight:600;background:var(--accent);color:#fff;transition:.12s;position:relative}
+  button:hover:not(:disabled){filter:brightness(1.05)}
+  button:active:not(:disabled){transform:translateY(1px)}
+  button:disabled{opacity:.6;cursor:progress}
+  button.ghost{background:#eef1f6;color:var(--ink)}
+  button.sec{background:var(--accent2)}
+  button.danger{background:var(--err)}
+  button.loading::after{content:"";position:absolute;right:8px;top:50%;width:12px;height:12px;
+    margin-top:-6px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;
+    animation:spin .6s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+  .esteps{display:none;gap:6px;align-items:center;margin-top:12px;font-size:12px;color:var(--sub)}
+  .echip{padding:4px 12px;border-radius:999px;background:#eef1f6;color:var(--sub);transition:.2s}
+  .echip.cur{background:var(--accent);color:#fff;font-weight:700}
+  .echip.done{background:#e6f7f0;color:var(--accent2)}
+  .echip.fail{background:#fdecea;color:var(--err)}
+
+  /* 视频 */
+  /* 视频：#vbox 固定高度居中，#video 旋转后不会把卡片撑变形 */
+  #vbox{height:255px;display:flex;align-items:center;justify-content:center;
+    overflow:hidden;background:#0d1117;border-radius:10px}
+  #video{width:100%;max-width:340px;height:auto;aspect-ratio:4/3;background:#0d1117;
+    border-radius:10px;display:block;transform-origin:center center;
+    transition:transform .18s ease}
+  /* 4:3 横图旋转 90/270 后会超高/超宽，缩放 0.75 兜住 */
+  #video.r90{transform:rotate(90deg) scale(.75)}
+  #video.r180{transform:rotate(180deg)}
+  #video.r270{transform:rotate(270deg) scale(.75)}
+  .verr{display:none;margin-top:10px;padding:10px 12px;border-radius:8px;
+    background:#fdecea;border:1px solid #f4c4bf;color:var(--err);font-size:12.5px;line-height:1.5}
+  .verr b{color:#b5302a}
+  .vok{display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12.5px;
+    background:#e6f7f0;color:var(--accent2);border:1px solid #bfe9d8}
+
+  /* 人脸状态条 */
+  .facebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+  .state{font-size:13px;font-weight:700;padding:4px 12px;border-radius:8px;background:#eef1f6;color:var(--sub)}
+  .state.ok{background:#e6f7f0;color:var(--accent2)}
+  .state.warn{background:#fff4e0;color:var(--warn)}
+  .state.err{background:#fdecea;color:var(--err)}
+  .readout{display:flex;gap:12px;font-size:12px;color:var(--sub);flex-wrap:wrap}
+  .readout b{color:var(--ink)}
+
+  /* 串口原始帧（醒目） */
+  .rawhdr{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .legend{display:flex;gap:12px;font-size:11px;color:var(--sub);margin-left:auto}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle}
+  .legend .ltx{background:var(--tx)} .legend .lrx{background:var(--rx)}
+  .raw{font:12px/1.5 ui-monospace,Consolas,Menlo,monospace;background:#0d1117;color:#cdd6e3;
+    border-radius:10px;padding:10px;height:300px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+  .raw .tx{color:#5fd99a}.raw .rx{color:#79b8ff}
+  .raw .meta{color:#8b98a9}
+
+  /* 事件/回包 */
+  .ev{font:12.5px/1.5 ui-monospace,Consolas,Menlo,monospace;background:#0d1117;color:#cdd6e3;
+    border-radius:10px;padding:10px;height:240px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+  .ev .er{color:#ff7b72}.ev .st{color:#d2a8ff}.ev .rp{color:#ffd479}.ev .nt{color:#79b8ff}
+  .reply{font-size:13px;padding:8px 10px;border-radius:8px;background:#fbfcfe;border:1px solid var(--line);margin-top:8px}
+  .reply.ok{border-color:#bfe9d8;background:#f1fbf7}
+  .reply.err{border-color:#f4c4bf;background:#fdf2f1}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  table th,table td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left}
+  table th{color:var(--sub);font-weight:700}
+  .note{font-size:11px;color:var(--sub);margin-top:6px}
+  .mini{font-size:11px;color:var(--sub)}
+
+  .banner{max-width:1060px;margin:12px auto 0;background:#fff7e6;border:1px solid #f0d492;color:#7a5b16;border-radius:8px;padding:10px 14px;font-size:13px;display:none}
+  .banner b{color:#b3541e}
+
+  /* Toast */
+  #toasts{position:fixed;right:16px;bottom:16px;z-index:50;display:flex;flex-direction:column;gap:8px}
+  .toast{background:#1f2733;color:#fff;font-size:13px;padding:9px 14px;border-radius:8px;
+    box-shadow:0 6px 20px rgba(0,0,0,.18);opacity:0;transform:translateY(8px);transition:.25s;max-width:300px}
+  .toast.show{opacity:1;transform:translateY(0)}
+  .toast.ok{background:#0f9d6e}.toast.err{background:#d23c30}.toast.send{background:#2f6df0}
+</style>
+</head>
+<body>
+<div class="banner" id="fileBanner">
+  ⚠ 检测到你直接双击打开了 <b>index.html</b>（file:// 协议），浏览器会拦截全部 API 请求，
+  串口与视频都会报 NetworkError。正确用法：先运行 <b>python3 app.py</b>，
+  再在浏览器打开 <b>http://127.0.0.1:5000</b>。
+</div>
+<header>
+  <h1>FM225 可视化调试平台</h1>
+  <span class="tag">UART 串口 · 实时人脸状态</span>
+  <span id="pill" class="pill off">未连接</span>
+</header>
+
+<div class="wrap">
+  <!-- 左列：控制 -->
+  <div class="col">
+    <div class="card">
+      <h2>连接</h2>
+      <label>串口</label>
+      <div class="row">
+        <select id="port"></select>
+        <button class="ghost" id="refresh" data-loading="刷新中…" style="flex:0 0 64px">刷新</button>
+      </div>
+      <label>波特率</label>
+      <input type="number" id="baud" value="115200">
+      <div class="row" style="margin-top:12px">
+        <button id="connect" data-loading="连接中…">连接</button>
+        <button class="danger" id="disconnect" data-loading="断开中…">断开</button>
+      </div>
+      <div class="note" id="portsHint"></div>
+    </div>
+
+    <div class="card">
+      <h2>命令</h2>
+      <label>用户名（录入用）</label>
+      <input type="text" id="username" value="admin">
+      <div class="btns">
+        <button id="c_enroll" data-loading="发送中…">单脸录入</button>
+        <button class="sec" id="c_enroll5" data-loading="发送中…">五向录入</button>
+        <button id="c_unlock" data-loading="发送中…">解锁</button>
+        <button id="c_getuser" data-loading="发送中…">用户列表</button>
+        <button id="c_delall" data-loading="发送中…">删除全部</button>
+        <button id="c_reset" data-loading="发送中…">模组复位</button>
+        <button class="ghost" id="c_version" data-loading="发送中…">获取版本</button>
+        <button class="ghost" id="c_sn" data-loading="发送中…">获取序列号</button>
+        <button class="ghost" id="c_quick" data-loading="检测中…" title="5 秒超时的单脸录入，用于四姿态扫描">快速检测(5s)</button>
+        <button class="ghost" id="c_health" data-loading="检查中…" title="依次读取版本/序列号/UVC参数/用户列表">一键健康检查</button>
+      </div>
+      <label>删除用户 UID</label>
+      <div class="row">
+        <input type="number" id="uid" value="1">
+        <button class="ghost" id="c_deluser" data-loading="发送中…" style="flex:0 0 96px">删除</button>
+      </div>
+      <div class="esteps" id="esteps">
+        <span class="mini" style="margin-right:2px">五向进度</span>
+        <span class="echip">正脸</span>
+        <span class="echip">左</span>
+        <span class="echip">右</span>
+        <span class="echip">上</span>
+        <span class="echip">下</span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" id="clear" data-loading="清空中…">清空日志</button>
+        <button class="ghost" id="exportlog" style="flex:0 0 124px">导出协议日志</button>
+      </div>
+      <div class="note" style="line-height:1.7">
+        <b>四姿态扫描找正确摆放：</b>① 预览旋转设回 0°；② 手持模组保持一个姿态，点「快速检测(5s)」；
+        ③ 看右侧人脸状态卡的「本次会话 NOTE 统计」——只要出现任何非 0x01 的状态码
+        （0x00 人脸正常 / 0x02~0x07 位置距离 / 0x08~0x0a 遮挡），该姿态即为算法认可的方向；
+        ④ 换 90° 步进共测 4 个姿态；⑤ 确定姿态后若预览是歪的，用「预览旋转」修正观看即可，两者互不影响。<br>
+        若 4 个姿态全是 0x01×N → 红外相机链路或曝光问题（可见光预览正常不代表红外正常）。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>视频预览 (UVC + 框叠加)</h2>
+      <div id="vbox"><img id="video" alt="FM225 视频"></div>
+      <div class="row" style="margin-top:10px">
+        <select id="vdevice" title="UVC 设备节点"></select>
+        <button class="sec" id="vstart" data-loading="开启中…" style="flex:0 0 72px">开启</button>
+        <button class="danger" id="vstop" data-loading="关闭中…" style="flex:0 0 72px">关闭</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label style="margin:0;flex:1">预览旋转(仅显示)
+          <select id="vrot" style="margin-top:4px">
+            <option value="0">0°</option>
+            <option value="90" selected>90°</option>
+            <option value="180">180°</option>
+            <option value="270">270°</option>
+          </select>
+        </label>
+        <label style="margin:0;flex:1">坐标上限 <input type="number" id="coordMax" value="100" style="margin-top:4px"></label>
+      </div>
+      <div class="vok" id="vok"></div>
+      <div class="verr" id="vErr"></div>
+      <div class="note">⚠️ 用四姿态找摆放方向时，请先把本旋转设回 <b>0°</b>——预览歪不歪只是显示层的事，算法认可的姿态以「本次会话 NOTE 统计」出现非 0x01 状态码为准。</div>
+      <div class="note">提示：录入前若已开启视频预览，本机会占用 /dev/video0，可能与模组内部检测争用相机，导致录入超时（日志里 NOTE 全是「未检测到人脸」）。建议「录入前先关闭视频」；若仍超时，再点「五向录入」并观察上面的五向进度。</div>
+    </div>
+  </div>
+
+  <!-- 右列：监控 -->
+  <div class="col">
+    <div class="card">
+      <div class="rawhdr">
+        <h2 style="margin:0">串口原始帧 (TX / RX)</h2>
+        <span class="legend"><span><i class="ltx"></i>TX 发送</span><span><i class="lrx"></i>RX 接收</span></span>
+      </div>
+      <div class="raw" id="raw"></div>
+      <div class="note">这里实时显示模块通信的每一帧原始十六进制（Sync EF AA … Check）。绿色=本机发出，蓝色=模块返回。点命令按钮即会在此出现对应帧。</div>
+    </div>
+
+    <div class="card">
+      <h2>人脸状态</h2>
+      <div class="facebar">
+        <span id="state" class="state">等待数据…</span>
+        <span class="readout">
+          <span>Yaw <b id="yaw">–</b></span>
+          <span>Pitch <b id="pitch">–</b></span>
+          <span>Roll <b id="roll">–</b></span>
+        </span>
+      </div>
+      <div class="readout" style="margin-top:6px">
+        <span>box L<b id="bl">–</b></span><span>T<b id="bt">–</b></span>
+        <span>R<b id="br">–</b></span><span>B<b id="bb">–</b></span>
+      </div>
+      <div class="note" id="notestats" style="margin-top:8px">本次会话 NOTE 统计：—</div>
+    </div>
+
+    <div class="card">
+      <h2>UVC 图像取向（0xB0 读 / 0xB1 设）</h2>
+      <div class="row">
+        <label style="margin:0;flex:1">USB 类型
+          <select id="uvcusb" style="margin-top:4px">
+            <option value="32" selected>USB2.0 (0x20)</option>
+            <option value="17">USB1.1 (0x11)</option>
+          </select>
+        </label>
+        <label style="margin:0;flex:1">旋转180°
+          <select id="uvcrot" style="margin-top:4px">
+            <option value="0" selected>关</option>
+            <option value="1">开</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label style="margin:0;flex:1">镜像
+          <select id="uvcmirror" style="margin-top:4px">
+            <option value="0" selected>关</option>
+            <option value="1">开</option>
+          </select>
+        </label>
+        <label style="margin:0;flex:1">JPEG 质量%
+          <input type="number" id="uvcq" value="80" style="margin-top:4px">
+        </label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" id="c_uvcread" data-loading="读取中…">读取当前参数</button>
+        <button class="sec" id="c_uvcset" data-loading="下发中…">下发设置</button>
+      </div>
+      <div class="note">注意：这两个命令只改 <b>USB 输出图像</b>的旋转/镜像（手册 V1.7 §0xB0/0xB1），
+      手册只提供 180° 与镜像，<b>不能</b>表达 90°。用它判断取向问题的思路：改设置后若预览方向变了
+      而人脸状态依旧 0x01，说明算法输入不受此设置影响（取向问题需物理正装相机）。</div>
+    </div>
+
+    <div class="card">
+      <h2>事件 / 回包</h2>
+      <div class="ev" id="ev"></div>
+      <div class="reply" id="reply">—</div>
+      <table id="users"><thead><tr><th>#</th><th>用户 ID</th></tr></thead><tbody><tr><td colspan="2" class="mini">暂无</td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const pill = $('pill'), rawEl = $('raw'), evEl = $('ev');
+function setPill(txt, cls){ pill.textContent = txt; pill.className = 'pill ' + cls; }
+
+// file:// 直开会拦截 fetch —— 明确提示
+if(location.protocol === 'file:'){ $('fileBanner').style.display = 'block'; }
+
+// ---- Toast ----
+function toast(msg, kind='info'){
+  const t = document.createElement('div');
+  t.className = 'toast ' + kind; t.textContent = msg;
+  $('toasts').appendChild(t);
+  requestAnimationFrame(()=> t.classList.add('show'));
+  setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(), 300); }, 2400);
+}
+
+// ---- 按钮忙态：点击即禁用+转圈+文案，避免误以为卡死 ----
+function withBusy(btn, fn){
+  if(btn.disabled) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.classList.add('loading');
+  btn.textContent = btn.dataset.loading || '处理中…';
+  Promise.resolve().then(fn).finally(()=>{
+    setTimeout(()=>{ btn.disabled=false; btn.classList.remove('loading'); btn.textContent=orig; }, 350);
+  });
+}
+
+const CMD_NAME = {enroll:'单脸录入',enroll5:'五向录入',unlock:'解锁',getuser:'用户列表',
+  delall:'删除全部',reset:'模组复位',deluser:'删除用户',version:'获取版本',sn:'获取序列号',
+  uvcread:'读UVC参数',uvcset:'设UVC参数'};
+
+// ---- 五向录入进度条 ----
+const ECHIP_STEP = {'录入正脸':0,'-> 录入左脸':1,'-> 录入右脸':2,'-> 录入上脸':3,'-> 录入下脸':4};
+let estepIdx = -1;
+function showEsteps(show){ $('esteps').style.display = show ? 'flex' : 'none'; }
+function resetEsteps(){
+  estepIdx = -1;
+  document.querySelectorAll('.echip').forEach(c=> c.className = 'echip');
+}
+function setEstep(idx){
+  if(idx < 0) return;
+  estepIdx = idx;
+  const chips = document.querySelectorAll('.echip');
+  chips.forEach((c,i)=>{
+    if(i < idx) c.className = 'echip done';
+    else if(i === idx) c.className = 'echip cur';
+    else c.className = 'echip';
+  });
+}
+function completeEsteps(){
+  document.querySelectorAll('.echip').forEach(c=> c.className = 'echip done');
+}
+function failEstep(){
+  const chips = document.querySelectorAll('.echip');
+  if(estepIdx>=0 && chips[estepIdx]) chips[estepIdx].className = 'echip fail';
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// label: 覆盖 toast 里显示的命令名（如「快速检测(5s)」复用 enroll）
+function sendCmd(c, extra={}, label=''){
+  if(c==='enroll5'){ showEsteps(true); resetEsteps(); setEstep(0); }
+  toast('已发送：' + (label || CMD_NAME[c] || c), 'send');
+  return fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({cmd:c}, extra))})
+    .then(r=>r.json())
+    .then(r=>{ if(!r.ok) toast('命令失败：'+r.msg,'err'); })
+    .catch(e=> toast('发送异常：'+e,'err'));
+}
+
+// ---- 端口列表 ----
+async function loadPorts(){
+  try{
+    const r = await (await fetch('/api/ports')).json();
+    const sel = $('port'); sel.innerHTML = '';
+    if(!r.ok){ $('portsHint').textContent = r.msg; return; }
+    if(!r.ports.length){ $('portsHint').textContent = '未发现串口'; return; }
+    r.ports.forEach(p=>{
+      const o = document.createElement('option');
+      o.value = p.device; o.textContent = p.device + ' — ' + p.desc + (p.ch340?' [CH340]':'');
+      sel.appendChild(o);
+    });
+    $('portsHint').textContent = '已列出 ' + r.ports.length + ' 个串口';
+  }catch(e){
+    $('portsHint').textContent = (location.protocol === 'file:')
+      ? '无法获取端口：当前是 file:// 直开，请用 http://127.0.0.1:5000 访问'
+      : '获取端口失败: ' + e;
+  }
+}
+$('refresh').onclick = ()=> withBusy($('refresh'), loadPorts);
+
+// ---- 连接状态：页面刷新后从后端真实状态恢复（避免假「未连接」） ----
+async function refreshStatusPill(){
+  try{
+    const r = await (await fetch('/api/status')).json();
+    if(r.ser_connected){ setPill('已连接 ' + (r.ser_port||''), 'on'); }
+    else { setPill('未连接','off'); }
+  }catch(e){ /* 静默，保持默认未连接 */ }
+}
+
+// ---- 视频设备列表 ----
+async function loadVideoDevices(){
+  try{
+    const r = await (await fetch('/api/video/devices')).json();
+    const sel = $('vdevice'); sel.innerHTML = '';
+    const devs = (r.ok && r.devices) ? r.devices : ['/dev/video0'];
+    devs.forEach(d=>{ const o=document.createElement('option'); o.value=d; o.textContent=d; sel.appendChild(o); });
+    if(!devs.includes('/dev/video0')){
+      const o=document.createElement('option'); o.value='/dev/video0'; o.textContent='/dev/video0'; sel.appendChild(o);
+    }
+  }catch(e){ /* 静默，默认保留 /dev/video0 */ }
+}
+
+// ---- 连接 ----
+$('connect').onclick = ()=> withBusy($('connect'), async ()=>{
+  const body = { port:$('port').value, baud:+$('baud').value };
+  const r = await (await fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  if(r.ok){ setPill('已连接','on'); toast('串口已连接','ok'); }
+  else { setPill('连接失败','off'); toast('连接失败：'+r.msg,'err'); }
+});
+$('disconnect').onclick = ()=> withBusy($('disconnect'), async ()=>{
+  await fetch('/api/disconnect',{method:'POST'});
+  setPill('未连接','off'); toast('已断开','ok');
+});
+
+// ---- 命令 ----
+$('c_enroll').onclick  = ()=> withBusy($('c_enroll'),  ()=> sendCmd('enroll',{username:$('username').value}));
+$('c_enroll5').onclick = ()=> withBusy($('c_enroll5'), ()=> sendCmd('enroll5',{username:$('username').value}));
+$('c_unlock').onclick  = ()=> withBusy($('c_unlock'),  ()=> sendCmd('unlock'));
+$('c_getuser').onclick = ()=> withBusy($('c_getuser'), ()=> sendCmd('getuser'));
+$('c_delall').onclick  = ()=> withBusy($('c_delall'),  ()=> sendCmd('delall'));
+$('c_reset').onclick   = ()=> withBusy($('c_reset'),   ()=> sendCmd('reset'));
+$('c_version').onclick = ()=> withBusy($('c_version'), ()=> sendCmd('version'));
+$('c_sn').onclick      = ()=> withBusy($('c_sn'),      ()=> sendCmd('sn'));
+$('c_uvcread').onclick = ()=> withBusy($('c_uvcread'), ()=> sendCmd('uvcread'));
+$('c_uvcset').onclick  = ()=> withBusy($('c_uvcset'),  ()=> sendCmd('uvcset',{
+  usbType:+$('uvcusb').value, rotate180:+$('uvcrot').value,
+  mirror:+$('uvcmirror').value, jpegQ:+$('uvcq').value}));
+$('c_deluser').onclick = ()=> withBusy($('c_deluser'), ()=> sendCmd('deluser',{uid:+$('uid').value}));
+// 快速检测：短超时单脸录入，仅用于姿态扫描（成功会真实录入，可用「删除全部」清掉）
+$('c_quick').onclick = ()=> withBusy($('c_quick'), ()=>{
+  toast('若检测成功会真实录入该用户，之后可用「删除全部」清掉','send');
+  return sendCmd('enroll', {username:$('username').value, timeout:5}, '快速检测(5s)');
+});
+// 一键健康检查：顺序拉一遍只读信息，间隔 600ms 防止模组处理不过来
+$('c_health').onclick = ()=> withBusy($('c_health'), async ()=>{
+  await sendCmd('version');  await sleep(600);
+  await sendCmd('sn');       await sleep(600);
+  await sendCmd('uvcread');  await sleep(600);
+  await sendCmd('getuser');
+  toast('健康检查完成，结果见右侧事件/回包','ok');
+});
+$('clear').onclick     = ()=> withBusy($('clear'), ()=>{ rawEl.innerHTML=''; evEl.innerHTML=''; });
+$('exportlog').onclick = ()=> window.open('/api/protolog');   // 新标签页打开持久协议日志（含超时回包）
+
+// ---- 原始帧 / 事件 输出 ----
+function addRaw(text, cls){
+  const d = document.createElement('div'); d.className = cls;
+  d.textContent = text; rawEl.appendChild(d);
+  while(rawEl.childNodes.length > 400) rawEl.removeChild(rawEl.firstChild);
+  rawEl.scrollTop = rawEl.scrollHeight;
+}
+function addEv(text, cls){
+  const d = document.createElement('div'); d.className = cls||'';
+  d.textContent = text; evEl.appendChild(d);
+  while(evEl.childNodes.length > 300) evEl.removeChild(evEl.firstChild);
+  evEl.scrollTop = evEl.scrollHeight;
+}
+
+// ---- 人脸画布 / 数值 ----
+function classifyState(s){ return s===0x00?'ok':(s>=0x08?'err':'warn'); }
+const STATE_TEXT = {0:'人脸正常',1:'未检测到人脸',2:'太靠上',3:'太靠下',4:'太靠左',5:'太靠右',
+  6:'距离太远',7:'距离太近',8:'眉毛遮挡',9:'眼睛遮挡',10:'脸部遮挡',
+  11:'录入方向错误',12:'闭眼模式检测到睁眼',13:'闭眼',14:'无法判定睁闭眼'};
+
+// ---- SSE ----
+const es = new EventSource('/api/stream');
+es.onmessage = ev=>{
+  const e = JSON.parse(ev.data);
+  switch(e.type){
+    case 'raw_tx': addRaw('▶ TX ' + (e.label?('['+e.label+'] '):'') + e.hex, 'tx'); break;
+    case 'raw_rx': addRaw('◀ RX ' + (e.kind?('['+e.kind+'] '):'') + e.hex, 'rx'); break;
+    case 'error':  addEv('✖ '+e.msg,'er'); toast('错误：'+e.msg,'err'); break;
+    case 'status':
+      addEv('· '+e.msg,'st');
+      if(e.msg === '录入正脸'){ showEsteps(true); resetEsteps(); setEstep(0); }
+      else if(e.msg in ECHIP_STEP){ showEsteps(true); setEstep(ECHIP_STEP[e.msg]); }
+      else if(e.msg.indexOf('五向录入全部完成') >= 0){ completeEsteps(); toast('五向录入全部完成 ✅','ok'); }
+      break;
+    case 'note':
+      if(e.nid===0x01){
+        $('state').textContent = e.state_text; $('state').className = 'state ' + classifyState(e.state);
+        $('yaw').textContent=e.yaw; $('pitch').textContent=e.pitch; $('roll').textContent=e.roll;
+        $('bl').textContent=e.box.left; $('bt').textContent=e.box.top;
+        $('br').textContent=e.box.right; $('bb').textContent=e.box.bottom;
+        if(e.stats){
+          const parts = Object.keys(e.stats).map(k=> '0x'+(+k).toString(16).padStart(2,'0')
+            + '(' + (STATE_TEXT[+k]||'未知') + ')×' + e.stats[k]);
+          $('notestats').textContent = '本次会话 NOTE 统计（共 '+parts.length+' 种状态）：' + parts.join('  ');
+        }
+      } else { addEv('· '+e.text,'st'); }
+      break;
+    case 'reply':
+      addEv('◆ '+(e.text||''),'rp');
+      $('reply').textContent = e.text; $('reply').className = 'reply ' + (e.ok?'ok':'err');
+      if(!e.ok){
+        // 录入失败：明确提示原因（超时/相机/活体…）
+        if($('esteps').style.display === 'flex'){ failEstep(); }
+        toast('操作失败：' + e.text, 'err');
+      }
+      break;
+    case 'image': addEv('◆ IMAGE size='+e.size,'rp'); break;
+    case 'users':
+      const tb = $('users').querySelector('tbody'); tb.innerHTML='';
+      (e.list||[]).forEach((u,i)=>{ const tr=document.createElement('tr');
+        const cell = (u.uid !== undefined) ? ('uid=' + u.uid + (u.note?('（'+u.note+'）'):'')) : (u.raw||'');
+        tr.innerHTML='<td>'+(i+1)+'</td><td class="mini">'+cell+'</td>'; tb.appendChild(tr); });
+      if(!(e.list||[]).length) tb.innerHTML='<tr><td colspan="2" class="mini">空</td></tr>';
+      break;
+  }
+};
+es.onerror = ()=> addEv('· SSE 连接中断','er');
+
+// ---- 视频预览 ----
+const VROT_CLS = {0:'', 90:'r90', 180:'r180', 270:'r270'};
+// 预览旋转(仅显示)：本机 UVC 相机装配方向相对正方向偏 90°，默认 90° 才是正立；
+// 改选后记入 localStorage，下次打开沿用（做四姿态扫描找摆放时临时设回 0° 即可）。
+const VROT_DEFAULT = 90;
+function applyVrot(){ const v = +$('vrot').value; $('video').className = VROT_CLS[v] || ''; }
+(function(){ let v = parseInt(localStorage.getItem('fm225_vrot'), 10);
+  if(isNaN(v) || !(v in VROT_CLS)) v = VROT_DEFAULT;
+  $('vrot').value = String(v); applyVrot(); })();
+$('vrot').onchange = ()=>{ applyVrot(); try{ localStorage.setItem('fm225_vrot', $('vrot').value); }catch(e){} };
+
+$('vstart').onclick = ()=> withBusy($('vstart'), async ()=>{
+  const dev = $('vdevice').value || '/dev/video0';
+  const cm = +$('coordMax').value || 100;
+  const r = await (await fetch('/api/video/start',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({device:dev, coordMax:cm, auto:true})})).json();
+  const okb = $('vok'), eb = $('vErr');
+  okb.style.display='none'; eb.style.display='none'; eb.innerHTML='';
+  if(r.ok){
+    $('video').src='/api/video';
+    okb.style.display='block'; okb.textContent='✅ 视频已开启：'+r.device+'（相机帧 + 人脸框叠加）';
+  } else if(r.busy){
+    $('video').src='/api/video'; // 仍走合成帧，框仍叠加
+    eb.style.display='block';
+    eb.innerHTML='⚠ <b>摄像头被占用 / VMware USB 通道卡死</b><br>'+(r.err||'')+'<br>解决：VMware 菜单「可移动设备」→ 该摄像头 → 断开再连接(连到虚拟机)；或重启 VM。当前先用合成帧，人脸框仍会叠加。';
+  } else {
+    $('video').src='/api/video';
+    eb.style.display='block';
+    eb.innerHTML='⚠ <b>视频开启失败</b>：'+(r.err||r.msg||'未知')+'<br>当前先用合成帧，人脸框仍会叠加。';
+  }
+});
+$('vstop').onclick = ()=> withBusy($('vstop'), async ()=>{
+  $('video').src='';
+  await fetch('/api/video/stop',{method:'POST'}).catch(()=>{});
+  $('vok').style.display='none'; $('vErr').style.display='none';
+  toast('视频已关闭','ok');
+});
+
+loadPorts();
+loadVideoDevices();
+refreshStatusPill();
+</script>
+</body>
+</html>
